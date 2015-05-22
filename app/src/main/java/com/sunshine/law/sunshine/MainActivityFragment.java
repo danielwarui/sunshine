@@ -1,8 +1,11 @@
 package com.sunshine.law.sunshine;
 
 import android.content.Intent;
+import android.content.SharedPreferences;
+import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Bundle;
+import android.preference.PreferenceManager;
 import android.support.v4.app.Fragment;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -13,6 +16,8 @@ import android.widget.ArrayAdapter;
 import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import com.sunshine.law.sunshine.data.DBHandler;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -27,6 +32,7 @@ import java.net.URL;
 import java.net.HttpURLConnection;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.List;
 
 
 /**
@@ -37,7 +43,10 @@ public class MainActivityFragment extends Fragment {
     TaskWeather taskWeather;
     ListView listView;
 
+    DBHandler dbHandler;
+
     public MainActivityFragment() {
+
     }
 
     @Override
@@ -47,14 +56,60 @@ public class MainActivityFragment extends Fragment {
         //Data source
         String[] dummyData = new String[]{"Item 1", "Item 2", "Item 3", "Item 4", "Item 5", "Item 6", "Item 7", "Item 8"};
 
-        taskWeather = new TaskWeather();
-        taskWeather.execute();
+        SharedPreferences pref = PreferenceManager.getDefaultSharedPreferences(getActivity());
+        String location = pref.getString("user_location", "nairobi");
+        String units = pref.getString("user_units", "metric");
 
+        String urlString = "http://api.openweathermap.org/data/2.5/forecast/daily?";
+        Uri uribuilder = Uri.parse(urlString).buildUpon()
+                .appendQueryParameter("q", location)
+                .appendQueryParameter("mode", "json")
+                .appendQueryParameter("units", units)
+                .appendQueryParameter("cnt", "14")
+                .build();
+
+        dbHandler = new DBHandler(getActivity());
+        List<String[]> list = dbHandler.getWeatherData();
+
+        listView = (ListView)view.findViewById(R.id.listViewWeather);
+        /*
         ArrayAdapter<String> adapter = new ArrayAdapter<>(getActivity(), android.R.layout.simple_list_item_1, dummyData);
 
         //List view
-        listView = (ListView)view.findViewById(R.id.listViewWeather);
         listView.setAdapter(adapter);
+        */
+
+        if(list.size() > 0){ // Check if database has data
+            String[] dbWeatherData = new String[list.size()];
+            for(int i = 0; i < list.size(); i++){
+                StringBuilder dbStringBuilder = new StringBuilder();
+
+                //append date
+                dbStringBuilder.append(list.get(i)[0]);
+                dbStringBuilder.append(" - ");
+
+                //append weather
+                dbStringBuilder.append(list.get(i)[1]);
+                dbStringBuilder.append(" - ");
+
+                //append maxTemp
+                dbStringBuilder.append(list.get(i)[2]);
+                dbStringBuilder.append(" / ");
+
+                //append minTemp
+                dbStringBuilder.append(list.get(i)[3]);
+
+                //insert into array
+                dbWeatherData[i] = dbStringBuilder.toString();
+            }
+
+            ArrayAdapter<String> adapter = new ArrayAdapter<>(getActivity(), android.R.layout.simple_list_item_1, dbWeatherData);
+            listView.setAdapter(adapter);
+            Toast.makeText(getActivity(), "Fetched from local database", Toast.LENGTH_LONG).show();
+        }else{
+            taskWeather = new TaskWeather();
+            taskWeather.execute(uribuilder.toString());
+        }
 
         listView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
@@ -71,12 +126,15 @@ public class MainActivityFragment extends Fragment {
         return view;
     }
 
-    private class TaskWeather extends AsyncTask<Void, Void, String>{
+    private class TaskWeather extends AsyncTask<String, Void, String>{
         @Override
-        protected String doInBackground(Void... params) {
+        protected String doInBackground(String... params) {
             String jsonString = "";
             try {
-                URL url = new URL("http://api.openweathermap.org/data/2.5/forecast/daily?q=kenya&mode=json&units=metric&cnt=14");
+                //URL url = new URL("http://api.openweathermap.org/data/2.5/forecast/daily?q=nairobi&mode=json&units=metric&cnt=14");
+
+                URL url = new URL(params[0]);
+
                 HttpURLConnection httpConnection = (HttpURLConnection) url.openConnection();
                 InputStream inputStream = httpConnection.getInputStream();
                 InputStreamReader inputStreamReader = new InputStreamReader(inputStream);
@@ -89,6 +147,7 @@ public class MainActivityFragment extends Fragment {
                 }
 
                 jsonString = stringBuilder.toString();
+                Log.e("JSON", jsonString);
 
             } catch (MalformedURLException e) {
                 e.printStackTrace();
@@ -112,6 +171,7 @@ public class MainActivityFragment extends Fragment {
 
                 //initialize array with list size
                 weatherData = new String[jsonArray.length()];
+
                 for(int i = 0; i < jsonArray.length(); i++){
                     StringBuilder sb = new StringBuilder();
 
@@ -131,10 +191,14 @@ public class MainActivityFragment extends Fragment {
                     sb.append(jsonObjectTemp.getInt("min"));
 
                     weatherData[i] = sb.toString();
+
+                    dbHandler = new DBHandler(getActivity());
+                    dbHandler.insertWeatherData(simpleDateFormat.format(date).toString(), jsonArrayWeather.getJSONObject(0).getString("main"), jsonObjectTemp.getInt("max"), jsonObjectTemp.getInt("min"));
                 }
 
                 ArrayAdapter<String> adapter = new ArrayAdapter<>(getActivity(), android.R.layout.simple_list_item_1, weatherData);
                 listView.setAdapter(adapter);
+                Toast.makeText(getActivity(), "Fetched from online", Toast.LENGTH_LONG).show();
 
             } catch (JSONException e) {
                 e.printStackTrace();
